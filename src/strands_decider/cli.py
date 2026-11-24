@@ -55,6 +55,11 @@ def resolve_device(device: str | None) -> str:
 @app.command("serve")
 def serve_cmd(
     checkpoint: str = typer.Argument(...),
+    revision: str | None = typer.Option(
+        None,
+        "--revision",
+        help="Ревизия Hub для загрузки; health сообщает разрешённый immutable commit SHA.",
+    ),
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8000),
     device: str | None = typer.Option(
@@ -90,13 +95,14 @@ def serve_cmd(
         help="Also cap one forward's padded tokens (questions x longest state + question); for long-context torsos.",
     ),
 ) -> None:
-    """Serve POST /v1/systemone. JevBench's typesafe adapter runs against it unchanged."""
+    """Запускает HTTP server для POST /v1/systemone и preflight health."""
     from .server import serve
 
     selected_device = resolve_device(device)
     console.print(f"[green]serving[/] {checkpoint} on http://{host}:{port} ({selected_device})")
     serve(
         checkpoint,
+        revision=revision,
         host=host,
         port=port,
         device=selected_device,

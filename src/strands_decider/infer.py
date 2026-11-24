@@ -18,6 +18,8 @@ agree to within float tolerance (tests/test_prefix_cache.py pins that, for plain
 fallback is a safety valve rather than a different model.
 """
 
+# ruff: noqa: RUF002
+
 from __future__ import annotations
 
 import copy
@@ -568,12 +570,30 @@ def mlx_available() -> bool:
         return False
 
 
-def load_mlx(checkpoint: str, config: EngineConfig | None = None) -> SystemOneEngine:
-    """An engine with the torso on MLX (see mlx_engine.py), configured as a torch engine is."""
+def load_mlx(
+    checkpoint: str,
+    config: EngineConfig | None = None,
+    *,
+    revision: str | None = None,
+) -> SystemOneEngine:
+    """
+    Загружает engine с MLX torso.
+
+    Parameters:
+        checkpoint (str): Локальный checkpoint или Hub id.
+        config (EngineConfig | None): Конфигурация engine. По умолчанию: None.
+        revision (str | None): Ревизия checkpoint в Hub. По умолчанию: None.
+
+    Returns:
+        SystemOneEngine: Загруженный MLX engine.
+
+    Fallbacks:
+        Без MLX extra возбуждает RuntimeError.
+    """
     if not mlx_available():
         raise RuntimeError(
             "device 'mlx' needs Apple silicon and the mlx extra: pip install 'strands-decider[mlx]'"
         )
     from .mlx_engine import load_mlx_engine
 
-    return load_mlx_engine(checkpoint, config)
+    return load_mlx_engine(checkpoint, config, revision=revision)

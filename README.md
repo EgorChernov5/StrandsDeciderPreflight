@@ -137,8 +137,15 @@ strands-decider ask StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 \
 
 You can also run the model as a server, and ask questions via http requests:
 ```bash
-strands-decider serve StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 --port 8000
+strands-decider serve StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 \
+  --revision 216d1ccb46a9e9b036eb9187b248db98480f77d4 \
+  --port 8000
 ```
+
+`GET /health` (and its `/ping` alias) reports the resolved model revision, a separate
+tokenizer fingerprint, prompt/serializer contract ids, the native window, special-token
+reserve, and the actual runtime device/dtype. See [Serve](docs/inference.md#serve) for the
+complete preflight contract.
 
 ```bash
 curl -s localhost:8000/v1/systemone \

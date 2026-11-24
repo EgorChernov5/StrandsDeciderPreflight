@@ -17,6 +17,8 @@ reads a `rope_deltas` left on the module by the previous request.
 Needs transformers >= 5.18 and Pillow (`pip install "strands-decider[vision]"`).
 """
 
+# ruff: noqa: RUF002
+
 from __future__ import annotations
 
 import base64
@@ -323,17 +325,31 @@ class VisionDeciderModel(StrandsDeciderModel):
         cls,
         path: str,
         *,
+        revision: str | None = None,
         device_map: str | None = None,
         attn_implementation: str | None = None,
         trainable: bool = False,
         host_embeddings: bool | None = None,
     ) -> VisionDeciderModel:
-        """Load a Strands Decider checkpoint (e.g. v19) onto the multimodal torso, to serve it.
+        """
+        Загружает Strands Decider checkpoint в multimodal torso.
 
-        Text checkpoints trained their adapter on the bare decoder (`layers.N...`); in
-        the multimodal torso the same decoder sits under `language_model.layers.N...`,
-        so the adapter's keys are remapped onto it. Text behaviour is unchanged: the
-        weights the text path runs through are identical.
+        Parameters:
+            path (str): Локальный checkpoint или Hub id.
+            revision (str | None): Ревизия checkpoint в Hub. По умолчанию: None.
+            device_map (str | None): Карта устройств Transformers. По умолчанию: None.
+            attn_implementation (str | None): Реализация attention. По умолчанию: None.
+            trainable (bool): Режим обучения, который здесь не поддерживается.
+                По умолчанию: False.
+            host_embeddings (bool | None): Переопределение embeddings, которое здесь не
+                поддерживается. По умолчанию: None.
+
+        Returns:
+            VisionDeciderModel: Загруженная multimodal модель.
+
+        Fallbacks:
+            Ключи text adapter переносятся в language_model; неподдерживаемые режимы
+            возбуждают ValueError.
         """
         if trainable or host_embeddings is not None:
             raise ValueError("the multimodal model loads to serve only")
@@ -341,7 +357,8 @@ class VisionDeciderModel(StrandsDeciderModel):
         from safetensors.torch import load_file
         from transformers import AutoTokenizer
 
-        path = checkpoint_dir(path)
+        hub_id = None if os.path.isdir(path) else path
+        path = checkpoint_dir(path, revision)
         config = StrandsDeciderConfig.from_json(config_path(path))
         config.base_revision = base_revision(path, config)
         lora_file = os.path.join(path, "lora", "adapter_model.safetensors")
@@ -372,6 +389,8 @@ class VisionDeciderModel(StrandsDeciderModel):
                 )
         model.head.load_state_dict(head_state)
         model.head.to(torch.float32)
+        model.checkpoint_path = os.path.realpath(path)
+        model.checkpoint_hub_id = hub_id
         model.eval()
         return model
 
@@ -577,15 +596,32 @@ def load_vision_engine(
     checkpoint: str,
     config: EngineConfig | None = None,
     *,
+    revision: str | None = None,
     attn_implementation: str | None = None,
     image_long_side: int = 448,
 ) -> VisionEngine:
-    """A vision engine configured as `create_app` configures a text one (device, prefix
-    cache, `strict_window`, `max_batch`, model name), plus the image settings."""
+    """
+    Создаёт vision engine с общей HTTP-конфигурацией и image settings.
+
+    Parameters:
+        checkpoint (str): Локальный checkpoint или Hub id.
+        config (EngineConfig | None): Конфигурация engine. По умолчанию: None.
+        revision (str | None): Ревизия checkpoint в Hub. По умолчанию: None.
+        attn_implementation (str | None): Реализация attention. По умолчанию: None.
+        image_long_side (int): Максимальная сторона изображения. По умолчанию: 448.
+
+    Returns:
+        VisionEngine: Загруженный vision engine.
+
+    Fallbacks:
+        Без config используются значения EngineConfig по умолчанию.
+    """
     base = config or EngineConfig()
     names = {f.name for f in fields(EngineConfig)}
     cfg = VisionEngineConfig(
         **{k: v for k, v in asdict(base).items() if k in names}, image_long_side=image_long_side
     )
-    model = VisionDeciderModel.load(checkpoint, attn_implementation=attn_implementation)
+    model = VisionDeciderModel.load(
+        checkpoint, revision=revision, attn_implementation=attn_implementation
+    )
     return VisionEngine(model, cfg)

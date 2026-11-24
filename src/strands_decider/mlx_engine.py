@@ -21,6 +21,8 @@ rounding: MPS with the adapter merged the same way differs by 0.0105, and this e
 0.0036.
 """
 
+# ruff: noqa: RUF002
+
 from __future__ import annotations
 
 import json
@@ -63,12 +65,38 @@ _MODEL_TYPES = {"qwen3_5_text": "qwen3_5"}
 
 
 class _Readout:
-    """What the engine reads from `StrandsDeciderModel` besides the torso."""
+    """
+    Хранит readout и provenance отдельно загруженного MLX torso.
 
-    def __init__(self, config: StrandsDeciderConfig, tokenizer: Any, head: torch.nn.Module) -> None:
+    Attributes:
+        config (StrandsDeciderConfig): Конфигурация checkpoint.
+        tokenizer (Any): Загруженный tokenizer.
+        head (torch.nn.Module): Pointer head на CPU.
+        checkpoint_path (str): Разрешённый путь checkpoint.
+        checkpoint_hub_id (str | None): Hub id либо None для локального checkpoint.
+        runtime_device (str): Фактический MLX runtime.
+        runtime_dtype (str | None): Фактический dtype MLX torso.
+
+    Fallbacks:
+        Недоказуемый dtype хранится как None.
+    """
+
+    def __init__(
+        self,
+        config: StrandsDeciderConfig,
+        tokenizer: Any,
+        head: torch.nn.Module,
+        checkpoint_path: str,
+        checkpoint_hub_id: str | None,
+        runtime_dtype: str | None,
+    ) -> None:
         self.config = config
         self.tokenizer = tokenizer
         self.head = head
+        self.checkpoint_path = checkpoint_path
+        self.checkpoint_hub_id = checkpoint_hub_id
+        self.runtime_device = "mlx"
+        self.runtime_dtype = runtime_dtype
 
 
 def merge_lora(lm: Any, adapter_dir: str, prefix: str) -> int:
@@ -280,14 +308,26 @@ def load_mlx_engine(
     checkpoint: str,
     config: EngineConfig | None = None,
     *,
+    revision: str | None = None,
     cache_limit_bytes: int | None = DEFAULT_CACHE_LIMIT,
 ) -> MLXEngine:
-    """The MLX counterpart of `infer.load_engine`: a local checkpoint directory or a Hub repo id.
-
-    `config` is the torch engine's `EngineConfig`, with its device set to "mlx".
-    `cache_limit_bytes` sets MLX's process-wide buffer cache limit; None leaves it as it is.
     """
-    path = checkpoint_dir(checkpoint)
+    Загружает локальный или Hub checkpoint в MLX runtime.
+
+    Parameters:
+        checkpoint (str): Локальный checkpoint или Hub id.
+        config (EngineConfig | None): Конфигурация engine. По умолчанию: None.
+        revision (str | None): Ревизия checkpoint в Hub. По умолчанию: None.
+        cache_limit_bytes (int | None): Лимит MLX buffer cache. По умолчанию: 1 GiB.
+
+    Returns:
+        MLXEngine: Загруженный engine с provenance runtime.
+
+    Fallbacks:
+        Без revision используется обычная ревизия Hub по умолчанию.
+    """
+    hub_id = None if os.path.isdir(checkpoint) else checkpoint
+    path = checkpoint_dir(checkpoint, revision)
     decider_config = StrandsDeciderConfig.from_json(config_path(path))
     decider_config.base_revision = base_revision(path, decider_config)
     lora_dir = os.path.join(path, "lora")
@@ -312,5 +352,21 @@ def load_mlx_engine(
     head = build_head(decider_config, int(decoder.embed_tokens.weight.shape[1]))
     head.load_state_dict(head_state)
     head.to(torch.float32).eval()
+    runtime_dtype = next(
+        (
+            str(value.dtype)
+            for _, value in tree_flatten(decoder.parameters())
+            if mx.issubdtype(value.dtype, mx.floating)
+        ),
+        None,
+    )
     engine_config = replace(config or EngineConfig(), device="mlx")
-    return MLXEngine(decoder, owner, _Readout(decider_config, tokenizer, head), engine_config)
+    readout = _Readout(
+        decider_config,
+        tokenizer,
+        head,
+        os.path.realpath(path),
+        hub_id,
+        runtime_dtype,
+    )
+    return MLXEngine(decoder, owner, readout, engine_config)

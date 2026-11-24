@@ -81,7 +81,9 @@ def test_the_server_builds_the_mlx_engine_for_device_mlx(monkeypatch):
             {
                 "config": type(
                     "Config", (), {"base_model": "stub", "temperature": 1.0, "max_length": 512}
-                )()
+                )(),
+                "runtime_device": "mlx",
+                "runtime_dtype": "bfloat16",
             },
         )()
 

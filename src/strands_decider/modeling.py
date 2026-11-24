@@ -13,6 +13,8 @@ attention causal means the pretrained weights are used exactly as they were trai
 which matters a great deal when the adaptation is a rank-16 LoRA adapter.
 """
 
+# ruff: noqa: RUF002
+
 from __future__ import annotations
 
 import json
@@ -307,7 +309,20 @@ def apply_temperature(logits: torch.Tensor, temperature: Any) -> torch.Tensor:
 
 
 class StrandsDeciderModel(nn.Module):
-    """LLM torso + pointer head. The LM output head is never loaded."""
+    """
+    Объединяет LLM torso, tokenizer и pointer head без LM output head.
+
+    Attributes:
+        config (StrandsDeciderConfig): Конфигурация checkpoint.
+        torso (nn.Module): Загруженный корпус языковой модели.
+        tokenizer (Any): Tokenizer checkpoint.
+        head (nn.Module): Pointer head классификатора.
+        checkpoint_path (str | None): Разрешённый локальный путь checkpoint.
+        checkpoint_hub_id (str | None): Hub id либо None для локального checkpoint.
+
+    Fallbacks:
+        Provenance checkpoint отсутствует до загрузки через load.
+    """
 
     def __init__(self, config: StrandsDeciderConfig, torso: nn.Module, tokenizer: Any):
         super().__init__()
@@ -315,6 +330,8 @@ class StrandsDeciderModel(nn.Module):
         self.torso = torso
         self.tokenizer = tokenizer
         self.head = build_head(config, self.hidden_size(torso))
+        self.checkpoint_path: str | None = None
+        self.checkpoint_hub_id: str | None = None
 
     @staticmethod
     def hidden_size(torso: nn.Module) -> int:
@@ -509,15 +526,31 @@ class StrandsDeciderModel(nn.Module):
         cls,
         path: str,
         *,
+        revision: str | None = None,
         device_map: str | None = None,
         attn_implementation: str | None = None,
         trainable: bool = False,
         host_embeddings: bool | None = None,
     ) -> StrandsDeciderModel:
-        """Load checkpoint `path` (a local directory or a Hub id) to serve it, or with
-        `trainable` to train it on: the adapter trains, and the attention is the one training
-        uses. `host_embeddings`, when given, replaces the checkpoint's setting."""
-        path = checkpoint_dir(path)
+        """Загружает локальный checkpoint или снимок модели из Hub.
+
+        Parameters:
+            path (str): Локальный каталог или идентификатор модели в Hub.
+            revision (str | None): Ревизия checkpoint в Hub. По умолчанию: None.
+            device_map (str | None): Карта устройств Transformers. По умолчанию: None.
+            attn_implementation (str | None): Реализация attention. По умолчанию: None.
+            trainable (bool): Загружать адаптер для обучения. По умолчанию: False.
+            host_embeddings (bool | None): Переопределение размещения embeddings.
+                По умолчанию: None.
+
+        Returns:
+            StrandsDeciderModel: Загруженная модель с provenance checkpoint.
+
+        Fallbacks:
+            Без revision используется обычная ревизия Hub по умолчанию.
+        """
+        hub_id = None if os.path.isdir(path) else path
+        path = checkpoint_dir(path, revision)
         config = StrandsDeciderConfig.from_json(config_path(path))
         config.base_revision = base_revision(path, config)
         if host_embeddings is not None:
@@ -557,6 +590,8 @@ class StrandsDeciderModel(nn.Module):
         obj.head = build_head(config, cls.hidden_size(torso))
         obj.head.load_state_dict(head_state)
         obj.head.to(torch.float32)
+        obj.checkpoint_path = os.path.realpath(path)
+        obj.checkpoint_hub_id = hub_id
         return obj
 
 

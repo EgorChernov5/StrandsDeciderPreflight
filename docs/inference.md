@@ -209,10 +209,73 @@ strands-decider serve checkpoints/hobson-2b-recipe --port 8000
 targets this endpoint and runs against it unmodified: 231 of 231 tasks attempted and
 schema validity 1.000 ([External benchmark](../evaluation/jevbench.md#external-benchmark-jevbench-v1-public-set)).
 Compatibility with the Jev API itself is not verified. `GET /health` returns the model
-name, the checkpoint path, the base model, the device and the calibration temperature.
+name, the checkpoint path, the base model, the device and the calibration temperature,
+plus the SemanticValidation preflight contract described below.
 `GET /ping` and `POST /invocations` are the same as `/health` and `/v1/systemone`: they are
 the paths that SageMaker and Bedrock AgentCore Runtime call
 ([../deploy/sagemaker/](../deploy/sagemaker/README.md)).
+
+For a Hub checkpoint, pin the launch to a revision. The loader resolves a branch, tag or
+commit through the Hub snapshot API, but `/health` reports only the immutable resolved
+commit SHA. Omitting `--revision` keeps the previous behavior and resolves the repository's
+default revision.
+
+```powershell
+uv run strands-decider serve `
+  StrandsAgents/strands-decider-2B-qwen3.5-v1-2610 `
+  --revision 216d1ccb46a9e9b036eb9187b248db98480f77d4 `
+  --device cuda `
+  --port 8099
+
+Invoke-RestMethod http://127.0.0.1:8099/health |
+    ConvertTo-Json -Depth 10
+```
+
+The preflight fields describe the objects that were actually loaded, not CLI expectations:
+
+| field | semantics |
+| --- | --- |
+| `preflight_contract_version` | Schema identifier, currently `semantic-validation-preflight-v1`. |
+| `model_id` | Loaded Hub repository id, or `local-sha256:<digest>` for a local checkpoint. |
+| `model_revision` | Resolved Hub commit SHA, or `sha256:<digest>` of the local config, readout head, adapter and provenance used by the loader. |
+| `tokenizer_revision` | `sha256:<digest>` over the loaded tokenizer assets, including their relative names and byte lengths. It is independent of `model_revision`. |
+| `native_window` | `max_length` of the loaded `StrandsDeciderConfig`. |
+| `prompt_contract` | Stable `render_state` / `render_question` implementation id, `strands_decider_prompting_v1`. |
+| `serializer_revision` | Stable HTTP-to-model serializer id, `strands_decider_http_to_model_v1`. |
+| `special_tokens` | Unique special tokens exposed by the loaded tokenizer, sorted lexically for deterministic transport. |
+| `prompt_reserve` | Number returned by the loaded tokenizer for special tokens automatically added to one serialized state. Dynamic state/question text is excluded. |
+| `device` | Device of the loaded floating-point torso parameters, or the loaded MLX runtime. |
+| `dtype` | Dtype of the loaded floating-point torso parameters after device-specific conversion. |
+| `backend_contract` | Endpoint/serializer contract, `strands_decider.http.v1.systemone`. |
+| `preflight_errors` | Diagnostics for fields that could not be proved. Every such field is `null`; no configured default is substituted. |
+
+Example (digests are illustrative):
+
+```json
+{
+  "status": "ok",
+  "model": "strands-decider-2B-qwen3.5-v1-2610",
+  "checkpoint": "StrandsAgents/strands-decider-2B-qwen3.5-v1-2610",
+  "base_model": "Qwen/Qwen3.5-2B-Base",
+  "max_length": 4096,
+  "temperature": 1.0,
+  "device": "cuda:0",
+  "prefix_cache": true,
+  "vision": false,
+  "preflight_contract_version": "semantic-validation-preflight-v1",
+  "model_id": "StrandsAgents/strands-decider-2B-qwen3.5-v1-2610",
+  "model_revision": "216d1ccb46a9e9b036eb9187b248db98480f77d4",
+  "tokenizer_revision": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "native_window": 4096,
+  "special_tokens": ["<|endoftext|>", "<|im_end|>", "<|im_start|>"],
+  "prompt_reserve": 0,
+  "dtype": "bfloat16",
+  "prompt_contract": "strands_decider_prompting_v1",
+  "serializer_revision": "strands_decider_http_to_model_v1",
+  "backend_contract": "strands_decider.http.v1.systemone",
+  "preflight_errors": []
+}
+```
 
 The server binds to `127.0.0.1` by default and has no authentication. Its behaviour under
 concurrent requests is not verified. Use it for local experiments only
