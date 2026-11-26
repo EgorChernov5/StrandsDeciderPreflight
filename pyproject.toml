@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "setuptools-scm>=8", "wheel"]
+requires = ["setuptools>=77", "setuptools-scm>=8", "wheel", "packaging>=24.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -57,6 +57,10 @@ dev = [
     "pre-commit>=3.7",
     "commitizen>=3.28",
 ]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
 
 [project.scripts]
 strands-decider = "strands_decider.cli:main"
@@ -190,3 +194,6 @@ check = [
 name = "cz_conventional_commits"
 version = "0.1.0"
 tag_format = "v$version"
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
